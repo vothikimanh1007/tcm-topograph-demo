@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TCM-TopoGraph: Population-Scale Ward Monitor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { background-color: #0f172a; color: #f8fafc; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .chart-container { position: relative; height: 250px; width: 100%; transition: all 0.3s ease; }
+        .chart-container.large { height: 500px; }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body class="p-6 min-h-screen flex flex-col gap-6">
+
+    <header class="flex justify-between items-center bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
+        <div>
+            <h1 class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-emerald-400 to-cyan-400">
+                TCM-TopoGraph: Cloud CDSS
+            </h1>
+            <p class="text-slate-400 mt-1">Population-Scale Ward Monitor (Heterogeneous Simulation)</p>
+        </div>
+        
+        <div class="flex gap-4">
+            <div class="bg-slate-900 p-4 rounded-lg border border-slate-700 text-center min-w-[120px]">
+                <p class="text-xs text-slate-400 uppercase tracking-wider">Cloud CPU</p>
+                <p id="cpu-metric" class="text-2xl font-bold text-emerald-400">42%</p>
+            </div>
+            <div class="bg-slate-900 p-4 rounded-lg border border-slate-700 text-center min-w-[120px]">
+                <p class="text-xs text-slate-400 uppercase tracking-wider">Active Streams</p>
+                <p class="text-2xl font-bold text-cyan-400">48</p>
+            </div>
+            <div class="bg-slate-900 p-4 rounded-lg border border-slate-700 text-center min-w-[120px]">
+                <p class="text-xs text-slate-400 uppercase tracking-wider">Avg RTT</p>
+                <p id="rtt-metric" class="text-2xl font-bold text-emerald-400">6.8 ms</p>
+            </div>
+        </div>
+    </header>
+
+    <div class="flex gap-6 bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg items-center">
+        <div class="flex-1">
+            <label class="block text-sm text-slate-400 mb-2">Select Clinical View</label>
+            <select id="view-selector" class="w-full bg-slate-900 border border-slate-600 text-white p-2 rounded focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+                <option value="all">All Patients Overview (Multi-Grid)</option>
+                <option value="p100">Patient 100: Stable Rhythm</option>
+                <option value="p104">Patient 104: Baseline Drift (Sweat/Impedance Drop)</option>
+                <option value="p108">Patient 108: Erratic Noise (Motion Artifacts)</option>
+            </select>
+        </div>
+        <div class="flex-1">
+            <label class="block text-sm text-slate-400 mb-2">Time Simulation Slider (T=0 to T=100)</label>
+            <input type="range" id="time-slider" min="10" max="100" value="50" class="w-full h-2 bg-slate-600 rounded-lg appearance-none cursor-pointer">
+        </div>
+    </div>
+
+    <div id="charts-wrapper" class="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1">
+        
+        <div id="wrapper-p100" class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg flex flex-col">
+            <h2 class="text-lg font-semibold text-slate-200 mb-2">Patient 100 (Stable)</h2>
+            <div class="chart-container" id="container-p100">
+                <canvas id="chart-p100"></canvas>
+            </div>
+        </div>
+
+        <div id="wrapper-p104" class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg flex flex-col">
+            <h2 class="text-lg font-semibold text-slate-200 mb-2">Patient 104 (Baseline Drift)</h2>
+            <div class="chart-container" id="container-p104">
+                <canvas id="chart-p104"></canvas>
+            </div>
+        </div>
+
+        <div id="wrapper-p108" class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg flex flex-col">
+            <h2 class="text-lg font-semibold text-slate-200 mb-2">Patient 108 (Motion Artifacts)</h2>
+            <div class="chart-container" id="container-p108">
+                <canvas id="chart-p108"></canvas>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // Data Simulation Generators
+        function generateData(timeSpan) {
+            const labels = [];
+            const p100_raw = [], p100_tda = [];
+            const p104_raw = [], p104_tda = [];
+            const p108_raw = [], p108_tda = [];
+
+            for (let t = 0; t <= timeSpan; t++) {
+                labels.push(t);
+                
+                // Common base rhythm
+                const baseSignal = Math.sin(t * 0.5) * 0.3;
+                const naturalNoise = (Math.random() - 0.5) * 0.1;
+
+                // Patient 100: Stable
+                p100_raw.push(baseSignal + naturalNoise);
+                p100_tda.push(baseSignal); // Perfect TDA extraction
+
+                // Patient 104: Baseline Drift (Sweat simulation)
+                const drift = -(t * 0.02);
+                p104_raw.push(baseSignal + naturalNoise + drift);
+                p104_tda.push(baseSignal); // TDA Normalizes the drift back to 0-axis
+
+                // Patient 108: Erratic Noise
+                let artifact = 0;
+                if (t % 25 === 0 && t > 0) artifact = (Math.random() > 0.5 ? 2.5 : -2.5); // Random massive spikes
+                p108_raw.push(baseSignal + naturalNoise + artifact);
+                // TDA detects high entropy during artifacts
+                p108_tda.push(artifact !== 0 ? artifact * 0.8 : baseSignal); 
+            }
+            return { labels, p100_raw, p100_tda, p104_raw, p104_tda, p108_raw, p108_tda };
+        }
+
+        // Chart Initialization Configuration
+        const chartOptions = {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: { duration: 0 }, // Disable animation for instantaneous slider response
+            scales: {
+                x: { grid: { color: '#334155' }, ticks: { color: '#94a3b8' } },
+                y: { grid: { color: '#334155' }, ticks: { color: '#94a3b8' }, suggestedMin: -3, suggestedMax: 3 }
+            },
+            plugins: {
+                legend: { labels: { color: '#cbd5e1' } }
+            }
+        };
+
+        // Create Chart Instances
+        function createChart(ctxId, labelRaw, labelTDA, colorRaw, colorTDA) {
+            const ctx = document.getElementById(ctxId).getContext('2d');
+            return new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        { label: labelRaw, data: [], borderColor: colorRaw, borderWidth: 1, pointRadius: 0, tension: 0.2 },
+                        { label: labelTDA, data: [], borderColor: colorTDA, borderWidth: 2, pointRadius: 0, tension: 0.2 }
+                    ]
+                },
+                options: chartOptions
+            });
+        }
+
+        const chartP100 = createChart('chart-p100', 'Raw Sensor (Z_hat)', 'TDA Persistent Betti Output', '#94a3b8', '#34d399');
+        const chartP104 = createChart('chart-p104', 'Raw Sensor (Drifting)', 'TDA Normalized Output', '#94a3b8', '#38bdf8');
+        const chartP108 = createChart('chart-p108', 'Raw Sensor (Artifacts)', 'TDA Entropy Alert', '#94a3b8', '#fb7185');
+
+        // Update Logic
+        function updateDashboard() {
+            const time = parseInt(document.getElementById('time-slider').value);
+            const view = document.getElementById('view-selector').value;
+            const data = generateData(time);
+
+            // Update Data
+            chartP100.data.labels = data.labels;
+            chartP100.data.datasets[0].data = data.p100_raw;
+            chartP100.data.datasets[1].data = data.p100_tda;
+            chartP100.update();
+
+            chartP104.data.labels = data.labels;
+            chartP104.data.datasets[0].data = data.p104_raw;
+            chartP104.data.datasets[1].data = data.p104_tda;
+            chartP104.update();
+
+            chartP108.data.labels = data.labels;
+            chartP108.data.datasets[0].data = data.p108_raw;
+            chartP108.data.datasets[1].data = data.p108_tda;
+            chartP108.update();
+
+            // Handle UI Layout
+            const wrapper = document.getElementById('charts-wrapper');
+            const w100 = document.getElementById('wrapper-p100');
+            const w104 = document.getElementById('wrapper-p104');
+            const w108 = document.getElementById('wrapper-p108');
+            
+            const c100 = document.getElementById('container-p100');
+            const c104 = document.getElementById('container-p104');
+            const c108 = document.getElementById('container-p108');
+
+            if (view === 'all') {
+                wrapper.className = "grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1";
+                [w100, w104, w108].forEach(w => w.classList.remove('hidden'));
+                [c100, c104, c108].forEach(c => c.classList.remove('large'));
+            } else {
+                wrapper.className = "grid grid-cols-1 gap-6 flex-1";
+                [w100, w104, w108].forEach(w => w.classList.add('hidden'));
+                [c100, c104, c108].forEach(c => c.classList.add('large'));
+                
+                if (view === 'p100') { w100.classList.remove('hidden'); c100.classList.remove('hidden'); }
+                if (view === 'p104') { w104.classList.remove('hidden'); c104.classList.remove('hidden'); }
+                if (view === 'p108') { w108.classList.remove('hidden'); c108.classList.remove('hidden'); }
+            }
+
+            // Simulate dynamic telemetry
+            const rttBase = view === 'all' ? 6.8 : 2.4;
+            document.getElementById('rtt-metric').innerText = (rttBase + Math.random()).toFixed(1) + ' ms';
+            document.getElementById('cpu-metric').innerText = (time > 80 ? 75 : 42) + Math.floor(Math.random() * 5) + '%';
+            
+            // System warning color logic
+            if (time > 80 && view === 'all') {
+                document.getElementById('cpu-metric').classList.replace('text-emerald-400', 'text-amber-400');
+            } else {
+                document.getElementById('cpu-metric').classList.replace('text-amber-400', 'text-emerald-400');
+            }
+        }
+
+        // Event Listeners
+        document.getElementById('time-slider').addEventListener('input', updateDashboard);
+        document.getElementById('view-selector').addEventListener('change', updateDashboard);
+
+        // Initial render
+        updateDashboard();
+    </script>
+</body>
+</html>
