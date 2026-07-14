@@ -1,6 +1,6 @@
 # TCM-TopoGraph: Real-Time Topological and Geometric Clinical Decision Support System (CDSS)
 
-Official implementation and simulation environment for the dissertation topic: **"Topological Data Analysis in Heterogeneous and Non-Euclidean Biological Networks: Unified Geometric Representations for High-Order Synergy Prediction"**.
+Official implementation and simulation environment **"Topological Data Analysis in Heterogeneous and Non-Euclidean Biological Networks: Unified Geometric Representations for High-Order Synergy Prediction"**.
 
 
 ---
